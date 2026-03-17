@@ -6,6 +6,7 @@ import chromadb
 from dotenv import load_dotenv
 from openai import OpenAI
 from pypdf import PdfReader
+from sentence_transformers import SentenceTransformer
 
 load_dotenv()
 #load your variables into the program
@@ -18,6 +19,8 @@ if not api_key:
 client = OpenAI(api_key=api_key)
 #creating a connection object that will talk to the openAI servers.
 
+#runs machine and is free of charge
+embedding_model = SentenceTransformer("all-MiniLM-L6-v2")
 #streamlit 
 #create a browser tab title
 st.set_page_config(page_title="DocuChat", page_icon="📄")
@@ -40,7 +43,8 @@ def extract_text_from_pdf(file_path:str) -> str:
     for page in reader.pages:
         page_text = page.extract_text()
         if page_text:
-            full_text.append(page_text)
+            cleaned = " ".join(page_text.split())
+            full_text.append(cleaned)
     return "\n".join(full_text)
     
 #funtion takes in three inputs, 800 charactes each chunk, it overlaps to prevent losing context
@@ -59,17 +63,9 @@ def chunk_text(text:str, chunk_size: int= 800, overlap:int= 150)->list[str]:
     return chunks
 
 
-#response is the api request, asking to convert the text into embedding vector, to the client that we created earlier
-# converts to a list of numbers
-#input is text, a string, it will use the model "text-embedding-3-small and will convert text into vectors/numbers"
-#the embedding will store in chromadb
-#the embedding are like coordinates 
-def get_embedding(text:str) -> list[float]:
-    response = client.embeddings.create(
-        model="text-embedding-3-small",
-        input=text
-    )
-    return response.data[0].embedding
+#uses your laptop not the open ai api
+def get_embedding(text: str) -> list[float]:
+    return embedding_model.encode(text).tolist()
 
 #we check the data in the database, if the count returns more than 0 delete it
 #.get() this gets all items
@@ -113,35 +109,37 @@ def retrieve_chunks(question:str, top_k: int=3):
 
 #user as a string
 
-def answer_question(question:str, context_chunks: list[str]) ->str:
+
+def answer_question(question: str, context_chunks: list[str]) -> str:
+    context = "\n\n".join(context_chunks)
 #a list of text is retrieve, combied into one context block
 #\n\n adds blank lines between the chunks, we need a block of text not a python list, very important
-    context = "\n\n".join(context_chunks)
 
     #we send a request to the chat model 
-    response = client.chat.completions.create(
         #we want teh response model gpt-4.1-mini
-        model="gpt-4.1-mini",
+    try:
         #this is the converation, two roles: system and user
-        messages=[
-            {
-                "role": "system",
-                "content": (
-        "you are a helpful document assistant."
-        "answer only using the provided context."
-        "if answer is not in the context, say:"
-        "I could not find that in the uploaded pdf."
-                )
-            },
-            {
-                "role":"user",
-                "content": f"Context:\n{context}\n\nQuestion: {question}"
-            }
-        ]
-    )
-
-    return response.choices[0].message.content
-
+        response = client.chat.completions.create(
+            model="gpt-4.1-mini",
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "You are a helpful document assistant. "
+                        "Answer only using the provided context. "
+                        "If the answer is not in the context, say: "
+                        "'I could not find that in the uploaded PDF.'"
+                    )
+                },
+                {
+                    "role": "user",
+                    "content": f"Context:\n{context}\n\nQuestion: {question}"
+                }
+            ]
+        )
+        return response.choices[0].message.content
+    except Exception as e:
+        return f"Error generating answer: {e}"
 
 #this creates an upload file botton in the UI
 #the user selects pdf file
@@ -183,8 +181,10 @@ if uploaded_file is not None:
                 #extract the chunk text
                 documents = results["documents"][0]
                 metadatas =results["metadatas"][0]
-                answer = answer_question(question, documents)
-            
+                try:
+                  answer = "Top matching chunks shown below (OpenAI disabled)."
+                except Exception as e:
+                  answer = f"Answer generation failed: {e}"
             
             st.subheader("answer")
             st.write(answer) 
@@ -201,3 +201,4 @@ if uploaded_file is not None:
                 st.write(doc[:500] + ("..." if len(doc) > 500 else ""))
                 #adds a divider between the source and chunks
                 st.divider()
+
