@@ -57,3 +57,147 @@ def chunk_text(text:str, chunk_size: int= 800, overlap:int= 150)->list[str]:
         chunks.append(text[start:end])
         start += chunk_size - overlap
     return chunks
+
+
+#response is the api request, asking to convert the text into embedding vector, to the client that we created earlier
+# converts to a list of numbers
+#input is text, a string, it will use the model "text-embedding-3-small and will convert text into vectors/numbers"
+#the embedding will store in chromadb
+#the embedding are like coordinates 
+def get_embedding(text:str) -> list[float]:
+    response = client.embeddings.create(
+        model="text-embedding-3-small",
+        input=text
+    )
+    return response.data[0].embedding
+
+#we check the data in the database, if the count returns more than 0 delete it
+#.get() this gets all items
+
+def store_chunks(chunks:list[str], source_name:str)->None:
+    #the number of items sotred in the collection 
+    existing = collection.count()
+    if existing > 0:
+        try:
+            all_items =collection.get()
+          # check if id exist delete previous chunks this will clear the database
+            #this must be done so the script doesnt run everything, streamlit tends to do that creating duplicates
+            if all_items and all_items.get("ids"):
+                collection.delete(ids=all_items["ids"])
+                #we must do error handling incase something does go wrong, for now we can ignore
+        except Exception:
+            pass
+        # we must loop trhough the chunks 
+        # #ex. i=0, chunk="A", i=1, chunk="B", i=2, chunk="C"
+    for i, chunk in enumerate(chunks):
+        #converst the chunks into a vector
+        embedding = get_embedding(chunk)
+        #store in chromadb
+        collection.add(
+            ids=[f"{source_name}_{i}"],
+            documents=[chunk],
+            embeddings=[embedding], 
+            #stores extra details, information
+            metadatas=[{"source": source_name, "chunk_index": i}]
+        )
+
+#the question will be converted to embedding, searchde trough Chromadb, and return relevant chunks
+def retrieve_chunks(question:str, top_k: int=3):
+    query_embedding = get_embedding(question)
+    results = collection.query(
+        query_embeddings = [query_embedding], 
+        #return top 3
+        n_results=top_k
+    )
+    return results 
+
+#user as a string
+
+def answer_question(question:str, context_chunks: list[str]) ->str:
+#a list of text is retrieve, combied into one context block
+#\n\n adds blank lines between the chunks, we need a block of text not a python list, very important
+    context = "\n\n".join(context_chunks)
+
+    #we send a request to the chat model 
+    response = client.chat.completions.create(
+        #we want teh response model gpt-4.1-mini
+        model="gpt-4.1-mini",
+        #this is the converation, two roles: system and user
+        messages=[
+            {
+                "role": "system",
+                "content": (
+        "you are a helpful document assistant."
+        "answer only using the provided context."
+        "if answer is not in the context, say:"
+        "I could not find that in the uploaded pdf."
+                )
+            },
+            {
+                "role":"user",
+                "content": f"Context:\n{context}\n\nQuestion: {question}"
+            }
+        ]
+    )
+
+    return response.choices[0].message.content
+
+
+#this creates an upload file botton in the UI
+#the user selects pdf file
+uploaded_file = st.file_uploader("Upload a PDF", type="pdf")
+#if the file is not the it will be a file like object
+#if we dont do this the app will process the file that does not exist
+if uploaded_file is not None:
+    #this will create a temporary file on your computer, pdfreader works good with a file type
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
+        #keep the file around after the block ends so one can still read it
+        #the end must be .pdf (the suffix)
+        tmp_file.write(uploaded_file.read())
+        #copies the uploaded pdf contents into a temp file, and store it
+        temp_pdf_path= tmp_file.name
+        #the spinner will show while reading the pdf
+    with st.spinner("reading pdf..."):
+        text = extract_text_from_pdf(temp_pdf_path)
+    
+    #checking whether the pdf actually had readable text
+    #.strip removes whitespaces
+    if not text.strip():
+        st.error("no readable text found in this pdf.")
+    else: 
+        #splits the chunks into smaller pieces
+        with st.spinner("chunking and indexing document ..."):
+            chunks = chunk_text(text)
+            #creates embedding, stores in chromadb, adds metadata source file and chunk index
+            store_chunks(chunks, uploaded_file.name)
+      #show sucess message
+        st.success("pdf processed successfully.")
+
+        #the user ask a question
+        question = st.text_input("ask a question about the pdf")
+        
+        #embedd the question, search chromadb, find the most relevant chunks
+        if question:
+            with st.spinner("searching document and generating answer..."):
+                results = retrieve_chunks(question)
+                #extract the chunk text
+                documents = results["documents"][0]
+                metadatas =results["metadatas"][0]
+                answer = answer_question(question, documents)
+            
+            
+            st.subheader("answer")
+            st.write(answer) 
+
+            st.subheader("sources")
+            #source:name.pdf, chunk:2 ect.
+            #pairs each chunk with its metadata
+            for doc, meta in zip(documents, metadatas):
+                st.markdown(
+            #source filename, chunk number, and a preview of the chunk text
+                    f"**Source:** {meta['source']} | **Chunk:** {meta['chunk_index']}"
+                ) 
+                #show only the first 500 characters so its not too long
+                st.write(doc[:500] + ("..." if len(doc) > 500 else ""))
+                #adds a divider between the source and chunks
+                st.divider()
