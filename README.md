@@ -17,3 +17,38 @@ pip install -r requirements.txt
 streamlit run app.py
 
 you have to create an env and get a key for the api ai platform: https://platform.openai.com/api-keys
+
+Quick Update:
+
+After testing my application , I made a key decision to use Local Embedding.
+Originally this project use openAI, but there were two drawbacks:
+
+1. Api cost for every document uploaded
+2. repeated embedding calls due to streamlit reruns
+
+I made an improvement where the sistem was updated to use LOCAL EMBEDDING.
+
+1. sentence-transformers
+2. model-all-MiniLM-L6-v2
+
+-This will cost use nothing
+-faster processing (runs locally)
+-no repeated external calls and better privacy
+
+The tech used for this application:
+PYTHON
+STREAMlit(UI)
+CHROMADB
+SENTENCETRANSFORMERS
+OPENAI API
+PYPDF
+
+How to install:
+git clone https://github.com/YOUR_USERNAME/YOUR_REPO.git
+cd YOUR_REPO
+pip install -r requirements.txt
+
+Run the App:
+streamlit run app.py
+
+then open: http://localhost:8501
