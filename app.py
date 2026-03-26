@@ -7,6 +7,7 @@ from dotenv import load_dotenv
 from openai import OpenAI
 from pypdf import PdfReader
 from sentence_transformers import SentenceTransformer
+from docuchat_utils import extract_text_from_reader, clean_text, chunk_text 
 
 load_dotenv()
 #load your variables into the program
