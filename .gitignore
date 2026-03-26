@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 
 chroma_db/
 venv/
@@ -6,3 +7,10 @@ __pycache__/
 *.pyc
 .DS_Store
 .pytest_cache/
+=======
+.env
+venv/
+__pycache__/
+*.pyc
+chroma_db/
+>>>>>>> b8866da8bfbdfa61bd4a2e5054e2694f32e1d67c
